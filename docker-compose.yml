@@ -1,4 +1,15 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: distsys-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=distsys
+    ports:
+      - "5432:5432"
+    networks:
+      - distsys-net
   app:
     build:
       context: .
@@ -8,11 +19,13 @@ services:
       - "8080:8080"
     environment:
       - APP_PORT=8080
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=distsys
+    depends_on:
+      - postgres
     restart: unless-stopped
     networks:
       - distsys-net
