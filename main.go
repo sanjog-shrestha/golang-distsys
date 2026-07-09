@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -49,7 +51,7 @@ func connectWithRetry(dsn string, maxAttempts int) (*sql.DB, error) {
 		db, err = sql.Open("pgx", dsn)
 		if err != nil {
 			log.Printf("attempt %d:%d: sql.Open failed: %v", attempt, maxAttempts, err)
-			time.Sleep(time.Duration(attempt) * time.Second)
+			sleepwithBackoff(attempt)
 			continue
 		}
 
@@ -63,10 +65,39 @@ func connectWithRetry(dsn string, maxAttempts int) (*sql.DB, error) {
 		}
 		log.Printf("attempt %d:%d: ping failed: %v", attempt, maxAttempts, err)
 		db.Close()
-		time.Sleep(time.Duration(attempt) * time.Second)
+		sleepwithBackoff(attempt)
 	}
 
 	return nil, fmt.Errorf("could not connect after %d attempts: %w", maxAttempts, err)
+}
+
+func sleepwithBackoff(attempt int) {
+	base := math.Pow(2, float64(attempt-1))
+
+	if base > 30 {
+		base = 30
+	}
+
+	jitter := rand.Float64()
+
+	wait := time.Duration((base+jitter)*1000) * time.Millisecond
+	log.Printf("waiting %v before next attempt...", wait.Round(time.Millisecond))
+	time.Sleep(wait)
+
+}
+
+func runMigrations(ctx context.Context, db *sql.DB) error {
+	migration, err := os.ReadFile("migrations/001_create_events.sql")
+	if err != nil {
+		return fmt.Errorf("could not read migration file: %w", err)
+	}
+
+	_, err = db.ExecContext(ctx, string(migration))
+	if err != nil {
+		return fmt.Errorf("could not run migration: %w", err)
+	}
+	log.Println("migrations applied successfully")
+	return nil
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +137,10 @@ func main() {
 		log.Fatalf("fatal: could not connect to database: %v", err)
 	}
 	defer db.Close()
+
+	if err := runMigrations(context.Background(), db); err != nil {
+		log.Fatalf("fatal: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)

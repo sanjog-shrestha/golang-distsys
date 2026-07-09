@@ -11,6 +11,8 @@ RUN go mod download
 
 
 
+
+
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server main.go 
 
 # ---- Run stage ----
@@ -21,6 +23,8 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/ 
 
 COPY --from=builder /app/server .
+
+COPY migrations ./migrations
 
 EXPOSE 8080
 
