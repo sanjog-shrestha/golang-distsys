@@ -129,6 +129,46 @@ func dbCheckHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+type Event struct {
+	ID        int       `json:"id"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func createEventHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Message string `json:"message"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		}
+
+		if body.Message == "" {
+			http.Error(w, "message field is required", http.StatusBadRequest)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+
+		defer cancel()
+
+		var e Event
+		err := db.QueryRowContext(ctx, `INSERT INTO events (message) VALUES ($1) RETURNING id, message, created_at`,
+			body.Message,
+		).Scan(&e.ID, &e.Message, &e.CreatedAt)
+		if err != nil {
+			log.Printf("insert failed: %v", err)
+			http.Error(w, "failed to save event", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(e)
+	}
+}
+
 func main() {
 	cfg := loadConfig()
 
@@ -145,6 +185,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/db-check", dbCheckHandler(db))
+	mux.HandleFunc("POST /events", createEventHandler(db))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
